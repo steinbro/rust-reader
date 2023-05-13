@@ -1,3 +1,4 @@
+use widestring::WideString;
 use windows::w;
 use windows::core::PCWSTR;
 use windows::Win32::{
@@ -14,14 +15,12 @@ use windows::Win32::{
 use std::mem;
 use std::ops::Range;
 
-pub use crate::wide_string::*;
-
 pub fn create_static_window(window_wnd: HWND, name: Option<&WideString>) -> HWND {
     unsafe {
         wm::CreateWindowExW(
             wm::WINDOW_EX_STYLE(0),
             w!("STATIC"),
-            PCWSTR::from_raw(name.map(WideString::as_ptr).unwrap_or(&mut 0u16)),
+            name.map(|n| PCWSTR::from_raw(n.as_ptr())).unwrap_or(w!("")),
             wm::WS_CHILD | wm::WS_VISIBLE | wm::WINDOW_STYLE(wm::ES_CENTER as u32 | SS_NOPREFIX.0),
             0,
             0,
@@ -108,9 +107,10 @@ pub fn get_window_text_length(h_wnd: HWND) -> i32 {
 
 pub fn get_window_text(h_wnd: HWND) -> WideString {
     let mut buf = vec![0u16; get_window_text_length(h_wnd) as usize + 1];
-    let len = unsafe { wm::GetWindowTextW(h_wnd, &mut buf) };
-    buf.truncate(len as usize + 1);
-    WideString::from_raw(buf)
+    unsafe {
+        let len =  wm::GetWindowTextW(h_wnd, &mut buf);
+        WideString::from_ptr(buf.as_ptr(), len as usize)
+    }
 }
 
 pub fn destroy_window(h_wnd: HWND) {

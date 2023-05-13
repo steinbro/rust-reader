@@ -1,5 +1,6 @@
 use average::{Estimate, Variance};
 use chrono;
+use widestring::ustring::WideString;
 use std::mem::size_of;
 use std::mem::{zeroed, MaybeUninit};
 
@@ -178,18 +179,6 @@ impl SpVoice {
 
     pub fn toggle_window_visible(&self) -> bool {
         toggle_window_visible(self.window)
-    }
-
-    #[allow(dead_code)]
-    pub fn get_status_word(&mut self) -> String {
-        let status = self.get_status();
-        self.last_read.get_slice(status.word_range())
-    }
-
-    #[allow(dead_code)]
-    pub fn get_status_sent(&mut self) -> String {
-        let status = self.get_status();
-        self.last_read.get_slice(status.sent_range())
     }
 
     pub fn speak<T: Into<WideString>>(&mut self, string: T) {
@@ -444,7 +433,7 @@ impl Windowed for SpVoice {
                     "{:.1}% {} \"{}\" rust_reader",
                     100.0 * (word_range.start as f64) / (self.last_read.len() as f64),
                     format_duration(chrono::Duration::microseconds(ms_left as i64)),
-                    self.last_read.get_slice(word_range.clone())
+                    unsafe { WideString::from_ptr(self.last_read.as_slice()[word_range.clone()].as_ptr(), word_range.len()).to_string_lossy() }
                 )
                 .into();
                 set_console_title(&window_title);

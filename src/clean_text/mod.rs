@@ -1,10 +1,23 @@
 use regex::*;
 use std::borrow::Cow;
 use unicode_segmentation::*;
-use crate::wide_string::*;
 
 mod regex_cleaner_pair;
 pub use self::regex_cleaner_pair::*;
+
+pub trait LenUtf {
+    fn len_utf8(&self) -> usize;
+    fn len_utf16(&self) -> usize;
+}
+
+impl LenUtf for str {
+    fn len_utf8(&self) -> usize {
+        self.len()
+    }
+    fn len_utf16(&self) -> usize {
+        self.chars().map(char::len_utf16).sum()
+    }
+}
 
 // // un comment and add #![feature(test)] to main to benchmark
 // #[cfg(test)]

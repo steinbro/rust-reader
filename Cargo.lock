@@ -362,12 +362,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7e5500299e16ebb147ae15a00a942af264cf3688f47923b8fc2cd5858f23ad3"
 
 [[package]]
-name = "ordslice"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd20eec3dbe4376829cb7d80ae6ac45e0a766831dca50202ff2d40db46a8a024"
-
-[[package]]
 name = "preferences"
 version = "2.0.0"
 source = "git+https://github.com/Eh2406/preferences-rs?branch=patch-1#4f426cf52da97d3b8914e10d4492f953d4304238"
@@ -471,12 +465,12 @@ dependencies = [
  "error-code",
  "itertools",
  "lazy_static",
- "ordslice",
  "preferences",
  "quickcheck",
  "regex",
  "serde",
  "unicode-segmentation",
+ "widestring",
  "windows 0.46.0",
  "winres",
 ]
@@ -704,6 +698,12 @@ name = "wasm-bindgen-shared"
 version = "0.2.84"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0046fef7e28c3804e5e38bfa31ea2a0f73905319b677e57ebe37e49358989b5d"
+
+[[package]]
+name = "widestring"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "653f141f39ec16bba3c5abe400a0c60da7468261cc2cbf36805022876bc721a8"
 
 [[package]]
 name = "winapi"

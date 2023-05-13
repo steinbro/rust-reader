@@ -21,13 +21,13 @@ windows = { version = "0.46.0", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging"
 ] }
+widestring = "1.0.2"
 clipboard-win = "4.5.0"
 serde = { version = "1.0.160", features = ["derive"] }
 preferences = { git = "https://github.com/Eh2406/preferences-rs", branch = "patch-1"}
 unicode-segmentation = "1.10.1"
 regex = "1.8.1"
 itertools = "0.10.5"
-ordslice = "0.3.0"
 average = { version = "0.9.2", features = ["serde1"]}
 chrono = { version = "0.4", features = ["serde"] }
 error-code = "2.3.1"

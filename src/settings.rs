@@ -1,11 +1,11 @@
 use crate::clean_text::RegexCleanerPair;
 use crate::hot_key::*;
-use crate::wide_string::WideString;
 use crate::window::*;
 use average::Variance;
 use itertools::Itertools;
 use preferences::{prefs_base_dir, AppInfo, Preferences};
 use serde::{Deserialize, Serialize};
+use widestring::ustring::WideString;
 use windows::core::PCWSTR;
 use windows::w;
 use windows::Win32::{
@@ -307,8 +307,8 @@ impl SettingsWindow {
                 WPARAM(index),
                 LPARAM(buf.as_mut_ptr() as isize),
             );
+            WideString::from_ptr(buf.as_ptr(), item_length as usize).to_string_lossy()
         }
-        WideString::from_raw(buf).as_string()
     }
 
     pub fn get_inner_hotkeys(&self) -> [(u32, u32); 8] {
@@ -517,8 +517,8 @@ impl Windowed for SettingsWindow {
                         match mat {
                             Both(cl, rexpar) => {
                                 let (re, pal) = rexpar.to_parts();
-                                let new_a = get_window_text(cl.1).as_string();
-                                let new_b = get_window_text(cl.2).as_string();
+                                let new_a = get_window_text(cl.1).to_string().unwrap();
+                                let new_b = get_window_text(cl.2).to_string().unwrap();
                                 if !new_a.is_empty() || !new_b.is_empty() {
                                     if (new_a != re.as_str()) || (new_b != pal) {
                                         cl.0 = Some(RegexCleanerPair::new(new_a, new_b).is_ok());
@@ -529,8 +529,8 @@ impl Windowed for SettingsWindow {
                             }
                             Right(_) => (),
                             Left(cl) => {
-                                let new_a = get_window_text(cl.1).as_string();
-                                let new_b = get_window_text(cl.2).as_string();
+                                let new_a = get_window_text(cl.1).to_string().unwrap();
+                                let new_b = get_window_text(cl.2).to_string().unwrap();
                                 if !new_a.is_empty() || !new_b.is_empty() {
                                     cl.0 = Some(RegexCleanerPair::new(new_a, new_b).is_ok());
                                 }
@@ -565,8 +565,8 @@ impl Windowed for SettingsWindow {
                         .cleaners
                         .iter()
                         .map(|cl| {
-                            let new_a = get_window_text(cl.1).as_string();
-                            let new_b = get_window_text(cl.2).as_string();
+                            let new_a = get_window_text(cl.1).to_string().unwrap();
+                            let new_b = get_window_text(cl.2).to_string().unwrap();
                             RegexCleanerPair::new(new_a, new_b).unwrap()
                         })
                         .collect();

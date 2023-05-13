@@ -1,6 +1,7 @@
 // Comment out the following line in order to see console output
-#![cfg_attr(not(test), windows_subsystem = "windows")]
+//#![cfg_attr(not(test), windows_subsystem = "windows")]
 
+use widestring::ustring::WideString;
 use windows::Win32::{
     Foundation::{LPARAM, WPARAM},
     System::Threading::GetCurrentThreadId,
@@ -10,7 +11,6 @@ use windows::Win32::{
 #[cfg(test)]
 #[macro_use]
 extern crate lazy_static;
-mod wide_string;
 mod window;
 use crate::window::*;
 
@@ -42,10 +42,12 @@ impl State {
     fn read(&mut self) {
         self.voice.resume();
         match get_text() {
-            Ok(x) => self.voice.speak(clean_text::<WideString>(
-                &x,
-                &self.settings.get_inner_settings().cleaners,
-            )),
+            Ok(x) => self.voice.speak(x
+            //    clean_text::<WideString>(
+            //    &x,
+            //    &self.settings.get_inner_settings().cleaners,
+            //)
+            ),
             Err(x) => {
                 self.voice.speak("oops. error.");
                 println!("{:?}", x);

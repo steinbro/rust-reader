@@ -15,20 +15,6 @@ fn one_word() {
 }
 
 #[test]
-fn one_word_u8idx() {
-    let text = "Hello";
-    let vec_u8idx_in = clean_text_u8idx_in(text, &RE_LIST);
-    let vec_u8idx_out = clean_text_u8idx_out(text, &RE_LIST);
-    println!("\r\n{:?}", vec_u8idx_in);
-    println!("{:?}", vec_u8idx_out);
-    assert_eq!(vec_u8idx_in.len(), vec_u8idx_out.len());
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(0..5)), 0..5);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(0..4)), 0..4);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(4..5)), 4..5);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(3..4)), 3..4);
-}
-
-#[test]
 fn in_string() {
     assert_eq!(clean_text_string("Hello".to_string(), &RE_LIST), "Hello");
 }
@@ -92,43 +78,11 @@ fn url() {
 }
 
 #[test]
-fn two_word_with_tabs_u8idx() {
-    let text = "Hello\t\n\t\r\t\r\nworld!";
-    let vec_u8idx_in = clean_text_u8idx_in(text, &RE_LIST);
-    let vec_u8idx_out = clean_text_u8idx_out(text, &RE_LIST);
-    println!("\r\n{:?}", vec_u8idx_in);
-    println!("{:?}", vec_u8idx_out);
-    assert_eq!(vec_u8idx_in.len(), vec_u8idx_out.len());
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(0..5)), 0..5);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(3..5)), 3..5);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(5..6)), 5..12);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(6..7)), 12..13);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(3..7)), 3..13);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(3..8)), 3..14);
-}
-
-#[test]
 fn two_word_with_underscore() {
     assert_eq!(
         clean_text_string("Hello _________ world!", &RE_LIST),
         "Hello ___ world!"
     );
-}
-
-#[test]
-fn two_word_with_underscore_u8idx() {
-    let text = "Hello _________ world!";
-    let vec_u8idx_in = clean_text_u8idx_in(text, &RE_LIST);
-    let vec_u8idx_out = clean_text_u8idx_out(text, &RE_LIST);
-    println!("\r\n{:?}", vec_u8idx_in);
-    println!("{:?}", vec_u8idx_out);
-    assert_eq!(vec_u8idx_in.len(), vec_u8idx_out.len());
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(0..5)), 0..5);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(3..5)), 3..5);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(7..9)), 7..15);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(9..10)), 9..16);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(8..12)), 8..18);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(11..15)), 17..21);
 }
 
 #[test]
@@ -209,22 +163,6 @@ fn two_word_with_longchar() {
 }
 
 #[test]
-fn two_word_with_longchar_u8idx() {
-    let text = "Hello \u{1d565}\u{1d565}\u{1d565}\u{1d565}\u{1d565} world!";
-    let vec_u8idx_in = clean_text_u8idx_in(text, &RE_LIST);
-    let vec_u8idx_out = clean_text_u8idx_out(text, &RE_LIST);
-    println!("\r\n{:?}", vec_u8idx_in);
-    println!("{:?}", vec_u8idx_out);
-    assert_eq!(vec_u8idx_in.len(), vec_u8idx_out.len());
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(0..5)), 0..5);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(3..5)), 3..5);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(5..6)), 5..6);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(6..18)), 6..26);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(18..20)), 18..28);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(14..24)), 14..32);
-}
-
-#[test]
 fn two_word_with_multichar() {
     assert_eq!(
         clean_text_string(
@@ -234,23 +172,6 @@ fn two_word_with_multichar() {
         ),
         "Hello \u{5d4}\u{5a2}\u{5d4}\u{5a2}\u{5d4}\u{5a2} world!"
     );
-}
-
-#[test]
-fn two_word_with_multichar_u8idx() {
-    let text = "Hello \u{5d4}\u{5a2}\u{5d4}\u{5a2}\u{5d4}\u{5a2}\u{5d4}\u{5a2}\u{5d4}\u{5a2} \
-                world!";
-    let vec_u8idx_in = clean_text_u8idx_in(text, &RE_LIST);
-    let vec_u8idx_out = clean_text_u8idx_out(text, &RE_LIST);
-    println!("\r\n{:?}", vec_u8idx_in);
-    println!("{:?}", vec_u8idx_out);
-    assert_eq!(vec_u8idx_in.len(), vec_u8idx_out.len());
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(0..5)), 0..5);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(3..5)), 3..5);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(6..20)), 6..28);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(18..19)), 18..27);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(14..18)), 14..26);
-    assert_eq!(invert_idx(&vec_u8idx_in, &vec_u8idx_out, &(14..22)), 14..30);
 }
 
 fn test_clean_text_u8idx<T: AsRef<str>>(text: T) -> bool {
