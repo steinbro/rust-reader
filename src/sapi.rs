@@ -3,6 +3,7 @@ use chrono;
 use std::mem::size_of;
 use std::mem::{zeroed, MaybeUninit};
 
+use widestring::{u16str, U16String};
 use windows::core::PCWSTR;
 use windows::w;
 use windows::Win32::{
@@ -57,7 +58,7 @@ pub struct SpVoice {
     reload_settings: HWND,
     show_controls: HWND,
     nicon: Shell::NOTIFYICONDATAW,
-    last_read: WideString,
+    last_read: U16String,
     last_update: Option<(Instant, Range<usize>)>,
     us_per_utf16: [Variance; 21],
 }
@@ -77,7 +78,7 @@ impl SpVoice {
                 reload_settings: HWND(0),
                 show_controls: HWND(0),
                 nicon: zeroed(),
-                last_read: WideString::new(),
+                last_read: U16String::new(),
                 last_update: None,
                 us_per_utf16: Default::default(),
             });
@@ -189,16 +190,16 @@ impl SpVoice {
     #[allow(dead_code)]
     pub fn get_status_word(&mut self) -> String {
         let status = self.get_status();
-        self.last_read.get_slice(status.word_range())
+        self.last_read.get(status.word_range()).unwrap_or(u16str!("")).to_string_lossy()
     }
 
     #[allow(dead_code)]
     pub fn get_status_sent(&mut self) -> String {
         let status = self.get_status();
-        self.last_read.get_slice(status.sent_range())
+        self.last_read.get(status.sent_range()).unwrap_or(u16str!("")).to_string_lossy()
     }
 
-    pub fn speak<T: Into<WideString>>(&mut self, string: T) {
+    pub fn speak<T: Into<U16String>>(&mut self, string: T) {
         self.last_read = string.into();
         set_window_text(self.edit, &self.last_read);
         unsafe {
@@ -218,7 +219,7 @@ impl SpVoice {
         unsafe { self.voice.WaitUntilDone(INFINITE) }.unwrap();
     }
 
-    pub fn speak_wait<T: Into<WideString>>(&mut self, string: T) {
+    pub fn speak_wait<T: Into<U16String>>(&mut self, string: T) {
         self.speak(string);
         self.wait();
     }
@@ -450,7 +451,7 @@ impl Windowed for SpVoice {
                     "{:.1}% {} \"{}\" rust_reader",
                     100.0 * (word_range.start as f64) / (self.last_read.len() as f64),
                     format_duration(chrono::Duration::microseconds(ms_left as i64)),
-                    self.last_read.get_slice(word_range.clone())
+                    self.last_read.get(word_range.clone()).unwrap_or(u16str!("")).to_string_lossy()
                 )
                 .into();
                 set_console_title(&window_title);

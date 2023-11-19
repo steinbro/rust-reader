@@ -517,8 +517,8 @@ impl Windowed for SettingsWindow {
                         match mat {
                             Both(cl, rexpar) => {
                                 let (re, pal) = rexpar.to_parts();
-                                let new_a = get_window_text(cl.1).as_string();
-                                let new_b = get_window_text(cl.2).as_string();
+                                let new_a = get_window_text(cl.1).to_string_lossy();
+                                let new_b = get_window_text(cl.2).to_string_lossy();
                                 if !new_a.is_empty() || !new_b.is_empty() {
                                     if (new_a != re.as_str()) || (new_b != pal) {
                                         cl.0 = Some(RegexCleanerPair::new(new_a, new_b).is_ok());
@@ -529,8 +529,8 @@ impl Windowed for SettingsWindow {
                             }
                             Right(_) => (),
                             Left(cl) => {
-                                let new_a = get_window_text(cl.1).as_string();
-                                let new_b = get_window_text(cl.2).as_string();
+                                let new_a = get_window_text(cl.1).to_string_lossy();
+                                let new_b = get_window_text(cl.2).to_string_lossy();
                                 if !new_a.is_empty() || !new_b.is_empty() {
                                     cl.0 = Some(RegexCleanerPair::new(new_a, new_b).is_ok());
                                 }
@@ -565,8 +565,8 @@ impl Windowed for SettingsWindow {
                         .cleaners
                         .iter()
                         .map(|cl| {
-                            let new_a = get_window_text(cl.1).as_string();
-                            let new_b = get_window_text(cl.2).as_string();
+                            let new_a = get_window_text(cl.1).to_string_lossy();
+                            let new_b = get_window_text(cl.2).to_string_lossy();
                             RegexCleanerPair::new(new_a, new_b).unwrap()
                         })
                         .collect();

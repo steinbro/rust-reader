@@ -95,11 +95,11 @@ pub fn enable_window(h_wnd: HWND, enable: bool) -> bool {
     unsafe { EnableWindow(h_wnd, enable).into() }
 }
 
-pub fn set_console_title(title: &WideString) -> bool {
+pub fn set_console_title(title: &U16String) -> bool {
     unsafe { SetConsoleTitleW(PCWSTR::from_raw(title.as_ptr())).into() }
 }
 
-pub fn set_window_text(h_wnd: HWND, wide: &WideString) -> bool {
+pub fn set_window_text(h_wnd: HWND, wide: &U16String) -> bool {
     unsafe { wm::SetWindowTextW(h_wnd, PCWSTR::from_raw(wide.as_ptr())).into() }
 }
 
@@ -107,11 +107,11 @@ pub fn get_window_text_length(h_wnd: HWND) -> i32 {
     unsafe { wm::GetWindowTextLengthW(h_wnd) }
 }
 
-pub fn get_window_text(h_wnd: HWND) -> WideString {
+pub fn get_window_text(h_wnd: HWND) -> U16String {
     let mut buf = vec![0u16; get_window_text_length(h_wnd) as usize + 1];
     let len = unsafe { wm::GetWindowTextW(h_wnd, &mut buf) };
     buf.truncate(len as usize + 1);
-    WideString::from_raw(buf)
+    U16String::from_vec(buf)
 }
 
 pub fn destroy_window(h_wnd: HWND) {

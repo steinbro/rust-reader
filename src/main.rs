@@ -44,7 +44,7 @@ impl State {
             Ok(x) => self.voice.speak(clean_text::<WideString>(
                 &x,
                 &self.settings.get_inner_settings().cleaners,
-            )),
+            ).as_string()),
             Err(x) => {
                 self.voice.speak("oops. error.");
                 println!("{:?}", x);
