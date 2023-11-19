@@ -1,6 +1,7 @@
 // Comment out the following line in order to see console output
 #![cfg_attr(not(test), windows_subsystem = "windows")]
 
+use widestring::{u16cstr, U16CString};
 use windows::Win32::{
     Foundation::{LPARAM, WPARAM},
     System::Threading::GetCurrentThreadId,
@@ -41,12 +42,12 @@ impl State {
     fn read(&mut self) {
         self.voice.resume();
         match get_text() {
-            Ok(x) => self.voice.speak(clean_text::<WideString>(
+            Ok(x) => self.voice.speak(U16CString::from_str_truncate(clean_text::<WideString>(
                 &x,
                 &self.settings.get_inner_settings().cleaners,
-            ).as_string()),
+            ).as_string())),
             Err(x) => {
-                self.voice.speak("oops. error.");
+                self.voice.speak(&u16cstr!("oops. error."));
                 println!("{:?}", x);
             }
         }
@@ -71,7 +72,7 @@ impl State {
         }
         speech += &make_speech(self.settings.get_inner_settings(), &self.hk);
         self.voice.resume();
-        self.voice.speak(speech);
+        self.voice.speak(U16CString::from_str_truncate(speech));
     }
 
     fn show_settings(&mut self) {
@@ -173,7 +174,8 @@ fn main() {
 
     state
         .voice
-        .speak(make_speech(state.settings.get_inner_settings(), &state.hk));
+        .speak(U16CString::from_str_truncate(
+            make_speech(state.settings.get_inner_settings(), &state.hk)));
 
     while let Some(msg) = get_message() {
         match msg.message {
@@ -190,7 +192,7 @@ fn main() {
         }
     }
     state.voice.resume();
-    state.voice.speak_wait("bye!");
+    state.voice.speak_wait(u16cstr!("bye!"));
     state.settings.get_mut_inner_settings().time_estimater = state.voice.get_time_estimater();
     state.settings.inner_to_file();
 }

@@ -3,7 +3,7 @@ use chrono;
 use std::mem::size_of;
 use std::mem::{zeroed, MaybeUninit};
 
-use widestring::{u16str, U16String};
+use widestring::{u16str, u16cstr, U16CString};
 use windows::core::PCWSTR;
 use windows::w;
 use windows::Win32::{
@@ -58,7 +58,7 @@ pub struct SpVoice {
     reload_settings: HWND,
     show_controls: HWND,
     nicon: Shell::NOTIFYICONDATAW,
-    last_read: U16String,
+    last_read: U16CString,
     last_update: Option<(Instant, Range<usize>)>,
     us_per_utf16: [Variance; 21],
 }
@@ -78,7 +78,7 @@ impl SpVoice {
                 reload_settings: HWND(0),
                 show_controls: HWND(0),
                 nicon: zeroed(),
-                last_read: U16String::new(),
+                last_read: U16CString::new(),
                 last_update: None,
                 us_per_utf16: Default::default(),
             });
@@ -199,7 +199,7 @@ impl SpVoice {
         self.last_read.get(status.sent_range()).unwrap_or(u16str!("")).to_string_lossy()
     }
 
-    pub fn speak<T: Into<U16String>>(&mut self, string: T) {
+    pub fn speak<T: Into<U16CString>>(&mut self, string: T) {
         self.last_read = string.into();
         set_window_text(self.edit, &self.last_read);
         unsafe {
@@ -219,7 +219,7 @@ impl SpVoice {
         unsafe { self.voice.WaitUntilDone(INFINITE) }.unwrap();
     }
 
-    pub fn speak_wait<T: Into<U16String>>(&mut self, string: T) {
+    pub fn speak_wait<T: Into<U16CString>>(&mut self, string: T) {
         self.speak(string);
         self.wait();
     }
@@ -244,7 +244,7 @@ impl SpVoice {
     pub fn get_rate(&mut self) -> i32 {
         let mut rate = 0;
         unsafe { self.voice.GetRate(&mut rate) }.unwrap();
-        set_window_text(self.rate, &format!("reading at rate: {}", rate).into());
+        set_window_text(self.rate, &U16CString::from_str_truncate(format!("reading at rate: {}", rate)));
         rate
     }
 
@@ -425,7 +425,7 @@ impl Windowed for SpVoice {
                 }
                 if status.dwRunningState == 3 {
                     // called before end of reading.
-                    let window_title = "100.0% 0:00 rust_reader".into();
+                    let window_title = u16cstr!("100.0% 0:00 rust_reader").into();
                     set_console_title(&window_title);
                     set_window_text(self.window, &window_title);
                     self.last_update = None;
@@ -447,12 +447,12 @@ impl Windowed for SpVoice {
                 let len_left = (self.last_read.len() - word_range.end) as f64;
                 let ms_left = len_left * self.us_per_utf16[rate_shifted].mean()
                     + (len_left * self.us_per_utf16[rate_shifted].sample_variance()).sqrt();
-                let window_title = format!(
+                let window_title = U16CString::from_str_truncate(format!(
                     "{:.1}% {} \"{}\" rust_reader",
                     100.0 * (word_range.start as f64) / (self.last_read.len() as f64),
                     format_duration(chrono::Duration::microseconds(ms_left as i64)),
                     self.last_read.get(word_range.clone()).unwrap_or(u16str!("")).to_string_lossy()
-                )
+                ))
                 .into();
                 set_console_title(&window_title);
                 set_window_text(self.window, &window_title);

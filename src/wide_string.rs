@@ -6,27 +6,11 @@ use std::os::windows::ffi::OsStrExt;
 pub struct WideString(Vec<u16>);
 
 impl WideString {
-    pub fn new() -> WideString {
-        WideString(vec![0])
-    }
     pub fn from_raw(r: Vec<u16>) -> WideString {
         assert_eq!(r.last(), Some(&0));
         WideString(r)
     }
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
 
-    /// Returns a raw pointer to the slice's buffer.
-    ///
-    /// The caller must ensure that the slice outlives the pointer this
-    /// function returns, or else it will end up pointing to garbage.
-    ///
-    /// Modifying the slice may cause its buffer to be reallocated, which
-    /// would also make any pointers to it invalid.
-    pub fn as_ptr(&self) -> *const u16 {
-        self.0.as_ptr()
-    }
     pub fn as_string(&self) -> String {
         self.get_slice(0..(self.0.len() - 1))
     }

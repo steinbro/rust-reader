@@ -1,4 +1,4 @@
-use widestring::U16String;
+use widestring::{u16cstr, U16CString};
 use windows::w;
 use windows::core::PCWSTR;
 use windows::Win32::{
@@ -17,12 +17,12 @@ use std::ops::Range;
 
 pub use crate::wide_string::*;
 
-pub fn create_static_window(window_wnd: HWND, name: Option<&U16String>) -> HWND {
+pub fn create_static_window(window_wnd: HWND, name: Option<&U16CString>) -> HWND {
     unsafe {
         wm::CreateWindowExW(
             wm::WINDOW_EX_STYLE(0),
             w!("STATIC"),
-            PCWSTR::from_raw(name.unwrap_or(&U16String::from_str("")).as_ptr()),
+            PCWSTR::from_raw(name.unwrap_or(&U16CString::from(u16cstr!(""))).as_ptr()),
             wm::WS_CHILD | wm::WS_VISIBLE | wm::WINDOW_STYLE(wm::ES_CENTER as u32 | SS_NOPREFIX.0),
             0,
             0,
@@ -95,11 +95,11 @@ pub fn enable_window(h_wnd: HWND, enable: bool) -> bool {
     unsafe { EnableWindow(h_wnd, enable).into() }
 }
 
-pub fn set_console_title(title: &U16String) -> bool {
+pub fn set_console_title(title: &U16CString) -> bool {
     unsafe { SetConsoleTitleW(PCWSTR::from_raw(title.as_ptr())).into() }
 }
 
-pub fn set_window_text(h_wnd: HWND, wide: &U16String) -> bool {
+pub fn set_window_text(h_wnd: HWND, wide: &U16CString) -> bool {
     unsafe { wm::SetWindowTextW(h_wnd, PCWSTR::from_raw(wide.as_ptr())).into() }
 }
 
@@ -107,11 +107,11 @@ pub fn get_window_text_length(h_wnd: HWND) -> i32 {
     unsafe { wm::GetWindowTextLengthW(h_wnd) }
 }
 
-pub fn get_window_text(h_wnd: HWND) -> U16String {
+pub fn get_window_text(h_wnd: HWND) -> U16CString {
     let mut buf = vec![0u16; get_window_text_length(h_wnd) as usize + 1];
     let len = unsafe { wm::GetWindowTextW(h_wnd, &mut buf) };
     buf.truncate(len as usize + 1);
-    U16String::from_vec(buf)
+    U16CString::from_vec_truncate(buf)
 }
 
 pub fn destroy_window(h_wnd: HWND) {

@@ -1,7 +1,7 @@
 use crate::press_hotkey;
 use crate::window::*;
 use crate::Action;
-use widestring::u16str;
+use widestring::u16cstr;
 use windows::core::PCWSTR;
 use windows::w;
 use windows::Win32::{
@@ -73,7 +73,7 @@ impl OnScreenControlWindow {
             out.read = create_button_window(out.window, w!("read"));
             out.pause = create_button_window(out.window, w!("pause/resume"));
         }
-        set_window_text(out.window, &u16str!("reader controls").into());
+        set_window_text(out.window, &u16cstr!("reader controls").into());
         move_window(
             out.window,
             &RECT {

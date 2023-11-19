@@ -1,6 +1,6 @@
 use crate::clean_text::RegexCleanerPair;
 use crate::hot_key::*;
-use widestring::{U16String, WideString};
+use widestring::{u16cstr, U16CString};
 use crate::window::*;
 use average::Variance;
 use itertools::Itertools;
@@ -122,7 +122,7 @@ impl SettingsWindow {
             wm::SendMessageW(out.rate.1, Controls::TBM_SETPAGESIZE, WPARAM(0), LPARAM(1));
             out.rate.0 = create_static_window(out.window, None);
 
-            let voice_label: WideString = "voice".into();
+            let voice_label: U16CString = u16cstr!("voice").into();
             out.voice.0 = create_static_window(out.window, Some(&voice_label));
             out.voice.1 = wm::CreateWindowExW(
                 wm::WINDOW_EX_STYLE(0),
@@ -147,7 +147,7 @@ impl SettingsWindow {
             );
             // Populate combobox with all available voices
             for voice in out.available_voices.iter() {
-                let wide_voice: WideString = voice.as_str().into();
+                let wide_voice = U16CString::from_str_truncate(voice.as_str());
                 wm::SendMessageW(
                     out.voice.1,
                     wm::CB_ADDSTRING,
@@ -170,7 +170,7 @@ impl SettingsWindow {
                 .iter()
                 .zip(out.hotkeys.iter_mut())
             {
-                let wide_hotkey_name: WideString = format!("{}", act).into();
+                let wide_hotkey_name = U16CString::from_str_truncate(format!("{}", act));
                 ht.0 = create_static_window(window, Some(&wide_hotkey_name));
                 ht.1 = wm::CreateWindowExW(
                     wm::WINDOW_EX_STYLE(0),
@@ -194,7 +194,7 @@ impl SettingsWindow {
                 );
             }
         }
-        set_window_text(out.window, &"reader settings".into());
+        set_window_text(out.window, &u16cstr!("reader settings").into());
         out.get_inner_all();
         move_window(
             out.window,
@@ -260,14 +260,14 @@ impl SettingsWindow {
                 LPARAM((rate + 10) as isize),
             );
         }
-        set_window_text(self.rate.0, &format!("reading at rate: {}", rate).into());
+        set_window_text(self.rate.0, &U16CString::from_str_truncate(format!("reading at rate: {}", rate)));
         rate
     }
 
     pub fn get_inner_voice(&mut self) {
         unsafe {
             // Find position of setting in voice list
-            let wide_voice: WideString = self.settings.voice.as_str().into();
+            let wide_voice = U16CString::from_str_truncate(self.settings.voice.as_str());
             let index = wm::SendMessageW(
                 self.voice.1,
                 wm::CB_FINDSTRING,
@@ -308,7 +308,7 @@ impl SettingsWindow {
                 LPARAM(buf.as_mut_ptr() as isize),
             );
         }
-        U16String::from_vec(buf).to_string_lossy()
+        U16CString::from_vec_truncate(buf).to_string_lossy()
     }
 
     pub fn get_inner_hotkeys(&self) -> [(u32, u32); 8] {
@@ -345,8 +345,8 @@ impl SettingsWindow {
         {
             let (re, pal) = rexpar.to_parts();
             cl.0 = None;
-            set_window_text(cl.1, &re.as_str().into());
-            set_window_text(cl.2, &pal.into());
+            set_window_text(cl.1, &U16CString::from_str_truncate(re.as_str()));
+            set_window_text(cl.2, &U16CString::from_str_truncate(pal));
         }
         &self.settings.cleaners
     }
