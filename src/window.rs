@@ -1,3 +1,4 @@
+use widestring::U16String;
 use windows::w;
 use windows::core::PCWSTR;
 use windows::Win32::{
@@ -16,12 +17,12 @@ use std::ops::Range;
 
 pub use crate::wide_string::*;
 
-pub fn create_static_window(window_wnd: HWND, name: Option<&WideString>) -> HWND {
+pub fn create_static_window(window_wnd: HWND, name: Option<&U16String>) -> HWND {
     unsafe {
         wm::CreateWindowExW(
             wm::WINDOW_EX_STYLE(0),
             w!("STATIC"),
-            PCWSTR::from_raw(name.map(WideString::as_ptr).unwrap_or(&mut 0u16)),
+            PCWSTR::from_raw(name.unwrap_or(&U16String::from_str("")).as_ptr()),
             wm::WS_CHILD | wm::WS_VISIBLE | wm::WINDOW_STYLE(wm::ES_CENTER as u32 | SS_NOPREFIX.0),
             0,
             0,

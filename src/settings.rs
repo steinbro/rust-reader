@@ -1,6 +1,6 @@
 use crate::clean_text::RegexCleanerPair;
 use crate::hot_key::*;
-use crate::wide_string::WideString;
+use widestring::{U16String, WideString};
 use crate::window::*;
 use average::Variance;
 use itertools::Itertools;
@@ -308,7 +308,7 @@ impl SettingsWindow {
                 LPARAM(buf.as_mut_ptr() as isize),
             );
         }
-        WideString::from_raw(buf).as_string()
+        U16String::from_vec(buf).to_string_lossy()
     }
 
     pub fn get_inner_hotkeys(&self) -> [(u32, u32); 8] {
