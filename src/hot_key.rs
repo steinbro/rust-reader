@@ -56,8 +56,8 @@ pub struct HotKey {
 }
 
 impl HotKey {
-    pub fn new(modifiers: u32, vk: u32, id: i32) -> Option<HotKey> {
-        let new_hot = HotKey { modifiers, vk, id };
+    pub fn new(modifiers: u32, vk: u32, id: i32) -> HotKey {
+        let mut new_hot = HotKey { modifiers, vk, id };
         println!("new for HotKey: {} {}", new_hot, id);
         // https://msdn.microsoft.com/en-us/library/windows/desktop/ms646309.aspx
         if modifiers > 0 && vk > 0 {
@@ -70,13 +70,13 @@ impl HotKey {
                 )
             };
             if hr.0 == 0 {
-                None
-            } else {
-                Some(new_hot)
+                // If binding fails, just store hotkey as unset
+                println!("failed to bind {}", new_hot);
+                new_hot.modifiers = 0;
+                new_hot.vk = 0;
             }
-        } else {
-            Some(new_hot)
         }
+        new_hot
     }
 }
 
