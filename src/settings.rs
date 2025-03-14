@@ -17,7 +17,7 @@ use windows::Win32::{
     UI::WindowsAndMessaging as wm,
 };
 
-const APP_INFO: AppInfo = AppInfo {
+pub const APP_INFO: AppInfo = AppInfo {
     name: "rust_reader",
     author: "us",
 };
