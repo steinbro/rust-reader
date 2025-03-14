@@ -128,7 +128,7 @@ fn setup_hotkeys(settings: &mut Settings) -> Vec<HotKey> {
         .iter()
         .zip(settings.hotkeys.iter())
         .map(|(&act, &(modifiers, vk))| {
-            HotKey::new(modifiers, vk, act as i32).expect("Failed to bind hotkey") // make HotKey
+            HotKey::new(modifiers, vk, act as i32) // make HotKey
         })
         .collect()
 }
