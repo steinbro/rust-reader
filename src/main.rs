@@ -1,8 +1,13 @@
-// Comment out the following line in order to see console output
+// The following line prevents a console window from opening when the exe is
+// launched as a GUI application, such as from the file explorer. It also
+// suppresses all console output, which can impede debugging. The call to
+// AttachConsole in main should allow console messages to be printed only if
+// the exe is launched from the console, such as via cargo run.
 #![cfg_attr(not(test), windows_subsystem = "windows")]
 
 use windows::Win32::{
     Foundation::{LPARAM, WPARAM},
+    System::Console::{AttachConsole, ATTACH_PARENT_PROCESS},
     System::Threading::GetCurrentThreadId,
     UI::WindowsAndMessaging as wm,
 };
@@ -119,7 +124,7 @@ fn setup_hotkeys(settings: &mut Settings) -> Vec<HotKey> {
         .iter()
         .zip(settings.hotkeys.iter())
         .map(|(&act, &(modifiers, vk))| {
-            HotKey::new(modifiers, vk, act as i32).unwrap() // make HotKey
+            HotKey::new(modifiers, vk, act as i32).expect("Failed to bind hotkey") // make HotKey
         })
         .collect()
 }
@@ -155,6 +160,9 @@ fn make_speech(settings: &Settings, hk: &[HotKey]) -> String {
 }
 
 fn main() {
+    // Show print statements if we're running in a console
+    unsafe { AttachConsole(ATTACH_PARENT_PROCESS); }
+
     let com = Com::new();
     let mut voice = SpVoice::new(&com);
     let mut settings = Settings::from_file();
