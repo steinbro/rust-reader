@@ -74,8 +74,9 @@ impl<'de> Deserialize<'de> for RegexCleanerPair {
                     }
                 };
                 Ok(RegexCleanerPair {
-                    regex: Regex::new(&regex)
-                        .map_err(|_| de::Error::invalid_value(de::Unexpected::Str(&regex), &self))?,
+                    regex: Regex::new(&regex).map_err(|_| {
+                        de::Error::invalid_value(de::Unexpected::Str(&regex), &self)
+                    })?,
                     rep,
                 })
             }

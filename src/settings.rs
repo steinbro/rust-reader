@@ -6,8 +6,8 @@ use average::Variance;
 use itertools::Itertools;
 use preferences::{prefs_base_dir, AppInfo, Preferences};
 use serde::{Deserialize, Serialize};
-use windows::core::PCWSTR;
-use windows::w;
+use std::ptr::null_mut;
+use windows::core::{w, PCWSTR};
 use windows::Win32::{
     Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
     Graphics::Gdi,
@@ -53,14 +53,14 @@ impl SettingsWindow {
         let mut out = Box::new(SettingsWindow {
             settings: s,
             available_voices: voice_list,
-            window: HWND(0),
-            rate: (HWND(0), HWND(0)),
-            voice: (HWND(0), HWND(0)),
-            hotkeys: [(HWND(0), HWND(0)); 8],
+            window: HWND(null_mut()),
+            rate: (HWND(null_mut()), HWND(null_mut())),
+            voice: (HWND(null_mut()), HWND(null_mut())),
+            hotkeys: [(HWND(null_mut()), HWND(null_mut())); 8],
             cleaners: Vec::new(),
-            add_cleaner: HWND(0),
-            reset: HWND(0),
-            save: HWND(0),
+            add_cleaner: HWND(null_mut()),
+            reset: HWND(null_mut()),
+            save: HWND(null_mut()),
         });
 
         let window_class_name = w!("setings_window_class_name");
@@ -70,15 +70,16 @@ impl SettingsWindow {
                 lpfnWndProc: Some(window_proc_generic::<SettingsWindow>),
                 cbClsExtra: 0,
                 cbWndExtra: 0,
-                hInstance: HINSTANCE(0),
+                hInstance: HINSTANCE(null_mut()),
                 hIcon: wm::LoadIconW(
-                    LibraryLoader::GetModuleHandleW(PCWSTR::null()).unwrap(),
+                    Some(HINSTANCE(
+                        LibraryLoader::GetModuleHandleW(PCWSTR::null()).unwrap().0,
+                    )),
                     PCWSTR::from_raw(1 as *const u16),
                 )
                 .expect("failed to load icon"),
-                hCursor: wm::LoadCursorW(HINSTANCE(0), wm::IDI_APPLICATION)
-                    .expect("failed to load icon"),
-                hbrBackground: Gdi::HBRUSH(16),
+                hCursor: wm::LoadCursorW(None, wm::IDI_APPLICATION).expect("failed to load icon"),
+                hbrBackground: Gdi::HBRUSH(16 as _),
                 lpszMenuName: PCWSTR::null(),
                 lpszClassName: window_class_name,
             });
@@ -91,11 +92,12 @@ impl SettingsWindow {
                 0,
                 0,
                 0,
-                wm::GetDesktopWindow(),
-                wm::HMENU(0),
-                HINSTANCE(0),
+                Some(wm::GetDesktopWindow()),
+                None,
+                None,
                 Some(&mut *out as *mut _ as *mut _),
-            );
+            )
+            .expect("CreateWindowExW failed");
             Controls::InitCommonControls();
             out.rate.1 = wm::CreateWindowExW(
                 wm::WINDOW_EX_STYLE(0),
@@ -108,18 +110,24 @@ impl SettingsWindow {
                 0,
                 0,
                 0,
-                out.window,
-                wm::HMENU(0),
-                HINSTANCE(0),
+                Some(out.window),
                 None,
-            );
+                None,
+                None,
+            )
+            .expect("CreateWindowExW failed");
             wm::SendMessageW(
                 out.rate.1,
                 Controls::TBM_SETRANGE,
-                WPARAM(0),
-                LPARAM((20 << 16) as isize),
+                Some(WPARAM(0)),
+                Some(LPARAM((20 << 16) as isize)),
             );
-            wm::SendMessageW(out.rate.1, Controls::TBM_SETPAGESIZE, WPARAM(0), LPARAM(1));
+            wm::SendMessageW(
+                out.rate.1,
+                Controls::TBM_SETPAGESIZE,
+                Some(WPARAM(0)),
+                Some(LPARAM(1)),
+            );
             out.rate.0 = create_static_window(out.window, None);
 
             let voice_label: WideString = "voice".into();
@@ -140,19 +148,20 @@ impl SettingsWindow {
                 0,
                 0,
                 0,
-                out.window,
-                wm::HMENU(0),
-                HINSTANCE(0),
+                Some(out.window),
                 None,
-            );
+                None,
+                None,
+            )
+            .expect("CreateWindowExW failed");
             // Populate combobox with all available voices
             for voice in out.available_voices.iter() {
                 let wide_voice: WideString = voice.as_str().into();
                 wm::SendMessageW(
                     out.voice.1,
                     wm::CB_ADDSTRING,
-                    WPARAM(0),
-                    LPARAM(wide_voice.as_ptr() as isize),
+                    Some(WPARAM(0)),
+                    Some(LPARAM(wide_voice.as_ptr() as isize)),
                 );
             }
 
@@ -181,16 +190,19 @@ impl SettingsWindow {
                     0,
                     0,
                     0,
-                    window,
-                    wm::HMENU(0),
-                    HINSTANCE(0),
+                    Some(window),
                     None,
-                );
+                    None,
+                    None,
+                )
+                .expect("CreateWindowExW failed");
                 wm::SendMessageW(
                     ht.1,
                     Controls::HKM_SETRULES,
-                    WPARAM((Controls::HKCOMB_NONE | Controls::HKCOMB_S) as usize),
-                    LPARAM(Controls::HOTKEYF_CONTROL as isize),
+                    Some(WPARAM(
+                        (Controls::HKCOMB_NONE | Controls::HKCOMB_S) as usize,
+                    )),
+                    Some(LPARAM(Controls::HOTKEYF_CONTROL as isize)),
                 );
             }
         }
@@ -256,8 +268,8 @@ impl SettingsWindow {
             wm::SendMessageW(
                 self.rate.1,
                 Controls::TBM_SETPOS,
-                WPARAM(1),
-                LPARAM((rate + 10) as isize),
+                Some(WPARAM(1)),
+                Some(LPARAM((rate + 10) as isize)),
             );
         }
         set_window_text(self.rate.0, &format!("reading at rate: {}", rate).into());
@@ -271,8 +283,8 @@ impl SettingsWindow {
             let index = wm::SendMessageW(
                 self.voice.1,
                 wm::CB_FINDSTRING,
-                WPARAM(0),
-                LPARAM(wide_voice.as_ptr() as isize),
+                Some(WPARAM(0)),
+                Some(LPARAM(wide_voice.as_ptr() as isize)),
             )
             .0;
             // If voice from settings file was found, set combobox selection
@@ -280,19 +292,30 @@ impl SettingsWindow {
                 wm::SendMessageW(
                     self.voice.1,
                     wm::CB_SETCURSEL,
-                    WPARAM(index as usize),
-                    LPARAM(0),
+                    Some(WPARAM(index as usize)),
+                    Some(LPARAM(0)),
                 );
             }
         }
     }
 
     pub fn get_selected_voice(&self) -> String {
-        let index =
-            unsafe { wm::SendMessageW(self.voice.1, wm::CB_GETCURSEL, WPARAM(0), LPARAM(0)) }.0
-                as usize;
+        let index = unsafe {
+            wm::SendMessageW(
+                self.voice.1,
+                wm::CB_GETCURSEL,
+                Some(WPARAM(0)),
+                Some(LPARAM(0)),
+            )
+        }
+        .0 as usize;
         let item_length = unsafe {
-            wm::SendMessageW(self.voice.1, wm::CB_GETLBTEXTLEN, WPARAM(index), LPARAM(0))
+            wm::SendMessageW(
+                self.voice.1,
+                wm::CB_GETLBTEXTLEN,
+                Some(WPARAM(index)),
+                Some(LPARAM(0)),
+            )
         }
         .0;
         if item_length < 0 {
@@ -304,8 +327,8 @@ impl SettingsWindow {
             wm::SendMessageW(
                 self.voice.1,
                 wm::CB_GETLBTEXT,
-                WPARAM(index),
-                LPARAM(buf.as_mut_ptr() as isize),
+                Some(WPARAM(index)),
+                Some(LPARAM(buf.as_mut_ptr() as isize)),
             );
         }
         WideString::from_raw(buf).as_string()
@@ -317,8 +340,10 @@ impl SettingsWindow {
                 wm::SendMessageW(
                     hwnd.1,
                     Controls::HKM_SETHOTKEY,
-                    WPARAM((b as u16 | ((convert_mod(a as u8) as u16) << 8)).into()),
-                    LPARAM(0),
+                    Some(WPARAM(
+                        (b as u16 | ((convert_mod(a as u8) as u16) << 8)).into(),
+                    )),
+                    Some(LPARAM(0)),
                 );
             }
         }
@@ -335,7 +360,7 @@ impl SettingsWindow {
                 self.remove_cleaner(i);
             }
             unsafe {
-                wm::SendMessageW(self.window, wm::WM_SIZE, WPARAM(0), LPARAM(0));
+                wm::SendMessageW(self.window, wm::WM_SIZE, Some(WPARAM(0)), Some(LPARAM(0)));
             }
         }
         for (cl, rexpar) in self
@@ -420,11 +445,11 @@ impl Windowed for SettingsWindow {
                         let (l, r) = rect.0.split_columns(rect.1.right - 50);
                         let r = r.split_columns(25);
                         unsafe {
-                            Gdi::InvalidateRect(ht.3, None, true);
+                            Gdi::InvalidateRect(Some(ht.3), None, true);
                         }
                         move_window(ht.3, &r.0.inset(3));
                         unsafe {
-                            Gdi::InvalidateRect(ht.4, None, true);
+                            Gdi::InvalidateRect(Some(ht.4), None, true);
                         }
                         move_window(ht.4, &r.1.inset(3));
                         let (l, r) = l.split_columns(split_at);
@@ -448,38 +473,62 @@ impl Windowed for SettingsWindow {
                 let hiword = ((w_param.0 >> 16) & 0xffff) as u32;
 
                 if hiword == wm::BN_CLICKED {
-                    if self.reset.0 == l_param.0 {
+                    if self.reset.0 as isize == l_param.0 {
                         self.get_inner_all();
                     }
-                    if self.add_cleaner.0 == l_param.0 {
+                    if self.add_cleaner.0 as isize == l_param.0 {
                         self.add_cleaner();
                         dirty_cleaners = true;
                         unsafe {
-                            wm::SendMessageW(self.window, wm::WM_SIZE, WPARAM(0), LPARAM(0));
+                            wm::SendMessageW(
+                                self.window,
+                                wm::WM_SIZE,
+                                Some(WPARAM(0)),
+                                Some(LPARAM(0)),
+                            );
                         }
                     }
-                    if let Some(i) = self.cleaners.iter().position(|x| x.3 .0 == l_param.0) {
+                    if let Some(i) = self
+                        .cleaners
+                        .iter()
+                        .position(|x| x.3 .0 as isize == l_param.0)
+                    {
                         self.swap_cleaner(i);
                         dirty_cleaners = true;
                         unsafe {
-                            wm::SendMessageW(self.window, wm::WM_SIZE, WPARAM(0), LPARAM(0));
+                            wm::SendMessageW(
+                                self.window,
+                                wm::WM_SIZE,
+                                Some(WPARAM(0)),
+                                Some(LPARAM(0)),
+                            );
                         }
                     }
-                    if let Some(i) = self.cleaners.iter().position(|x| x.4 .0 == l_param.0) {
+                    if let Some(i) = self
+                        .cleaners
+                        .iter()
+                        .position(|x| x.4 .0 as isize == l_param.0)
+                    {
                         self.remove_cleaner(i);
                         dirty_cleaners = true;
                         unsafe {
-                            wm::SendMessageW(self.window, wm::WM_SIZE, WPARAM(0), LPARAM(0));
+                            wm::SendMessageW(
+                                self.window,
+                                wm::WM_SIZE,
+                                Some(WPARAM(0)),
+                                Some(LPARAM(0)),
+                            );
                         }
                     }
                 }
 
-                let saving = self.save.0 == l_param.0 && hiword == wm::BN_CLICKED;
+                let saving = self.save.0 as isize == l_param.0 && hiword == wm::BN_CLICKED;
 
                 // rate change
-                let new_rate =
-                    unsafe { wm::SendMessageW(self.rate.1, TBM_GETPOS, WPARAM(0), LPARAM(0)) }.0
-                        - 10;
+                let new_rate = unsafe {
+                    wm::SendMessageW(self.rate.1, TBM_GETPOS, Some(WPARAM(0)), Some(LPARAM(0)))
+                }
+                .0 - 10;
                 if self.settings.rate != new_rate as i32 {
                     changed = true;
                 }
@@ -491,7 +540,12 @@ impl Windowed for SettingsWindow {
                 // hotkeys change
                 for (&(_, ht), hkt) in self.hotkeys.iter().zip_eq(self.settings.hotkeys.iter()) {
                     let set_to = unsafe {
-                        wm::SendMessageW(ht, Controls::HKM_GETHOTKEY, WPARAM(0), LPARAM(0))
+                        wm::SendMessageW(
+                            ht,
+                            Controls::HKM_GETHOTKEY,
+                            Some(WPARAM(0)),
+                            Some(LPARAM(0)),
+                        )
                     }
                     .0;
                     let new = (
@@ -505,7 +559,7 @@ impl Windowed for SettingsWindow {
                 if self
                     .cleaners
                     .iter()
-                    .any(|x| x.1 .0 == l_param.0 || x.2 .0 == l_param.0)
+                    .any(|x| x.1 .0 as isize == l_param.0 || x.2 .0 as isize == l_param.0)
                     || dirty_cleaners
                 {
                     // cleaners change
@@ -553,7 +607,12 @@ impl Windowed for SettingsWindow {
                         self.hotkeys.iter().zip_eq(self.settings.hotkeys.iter_mut())
                     {
                         let set_to = unsafe {
-                            wm::SendMessageW(ht, Controls::HKM_GETHOTKEY, WPARAM(0), LPARAM(0))
+                            wm::SendMessageW(
+                                ht,
+                                Controls::HKM_GETHOTKEY,
+                                Some(WPARAM(0)),
+                                Some(LPARAM(0)),
+                            )
                         }
                         .0;
                         *hkt = (

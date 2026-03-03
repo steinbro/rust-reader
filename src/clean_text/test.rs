@@ -1,10 +1,9 @@
-use once_cell::sync::Lazy;
 use super::*;
+use once_cell::sync::Lazy;
 use quickcheck::quickcheck;
 
-pub static RE_LIST: Lazy<Vec<RegexCleanerPair>> = Lazy::new(|| {
-    crate::settings::Settings::new().cleaners
-});
+pub static RE_LIST: Lazy<Vec<RegexCleanerPair>> =
+    Lazy::new(|| crate::settings::Settings::new().cleaners);
 
 pub fn clean_text_string<T: AsRef<str>>(raw: T, list: &[RegexCleanerPair]) -> String {
     clean_text(raw.as_ref(), list)

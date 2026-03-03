@@ -1,8 +1,8 @@
 use crate::press_hotkey;
 use crate::window::*;
 use crate::Action;
-use windows::core::PCWSTR;
-use windows::w;
+use std::ptr::null_mut;
+use windows::core::{w, PCWSTR};
 use windows::Win32::{
     Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
     Graphics::Gdi,
@@ -19,9 +19,9 @@ pub struct OnScreenControlWindow {
 impl OnScreenControlWindow {
     pub fn new() -> Box<OnScreenControlWindow> {
         let mut out = Box::new(OnScreenControlWindow {
-            window: HWND(0),
-            read: HWND(0),
-            pause: HWND(0),
+            window: HWND(null_mut()),
+            read: HWND(null_mut()),
+            pause: HWND(null_mut()),
         });
 
         let window_class_name = w!("on_screen_control_window_class_name");
@@ -31,15 +31,16 @@ impl OnScreenControlWindow {
                 lpfnWndProc: Some(window_proc_generic::<OnScreenControlWindow>),
                 cbClsExtra: 0,
                 cbWndExtra: 0,
-                hInstance: HINSTANCE(0),
+                hInstance: HINSTANCE(null_mut()),
                 hIcon: wm::LoadIconW(
-                    LibraryLoader::GetModuleHandleW(PCWSTR::null()).unwrap(),
+                    Some(HINSTANCE(
+                        LibraryLoader::GetModuleHandleW(PCWSTR::null()).unwrap().0,
+                    )),
                     PCWSTR::from_raw(1 as *const u16),
                 )
                 .expect("failed to load icon"),
-                hCursor: wm::LoadCursorW(HINSTANCE(0), wm::IDI_APPLICATION)
-                    .expect("failed to load icon"),
-                hbrBackground: Gdi::HBRUSH(16),
+                hCursor: wm::LoadCursorW(None, wm::IDI_APPLICATION).expect("failed to load icon"),
+                hbrBackground: Gdi::HBRUSH(16 as _),
                 lpszMenuName: PCWSTR::null(),
                 lpszClassName: window_class_name,
             });
@@ -54,15 +55,16 @@ impl OnScreenControlWindow {
                 0,
                 0,
                 0,
-                wm::GetDesktopWindow(),
-                wm::HMENU(0),
-                HINSTANCE(0),
+                Some(wm::GetDesktopWindow()),
+                None,
+                None,
                 Some(&mut *out as *mut _ as *mut _),
-            );
+            )
+            .expect("CreateWindowExW failed");
             // HWND_TOPMOST sets window to always be on top
             wm::SetWindowPos(
                 out.window,
-                wm::HWND_TOPMOST,
+                Some(wm::HWND_TOPMOST),
                 0,
                 0,
                 0,
@@ -117,10 +119,10 @@ impl Windowed for OnScreenControlWindow {
                 let hiword = ((w_param.0 >> 16) & 0xffff) as u32;
 
                 if hiword == wm::BN_CLICKED {
-                    if l_param.0 == self.read.0 {
+                    if l_param.0 == self.read.0 as isize {
                         press_hotkey(Action::Read);
                     }
-                    if l_param.0 == self.pause.0 {
+                    if l_param.0 == self.pause.0 as isize {
                         press_hotkey(Action::PlayPause);
                     }
                 }

@@ -5,7 +5,7 @@
 // the exe is launched from the console, such as via cargo run.
 #![cfg_attr(not(test), windows_subsystem = "windows")]
 
-use windows::w;
+use windows::core::w;
 use windows::Win32::{
     Foundation::{LPARAM, WPARAM},
     System::Console::{AttachConsole, ATTACH_PARENT_PROCESS},
@@ -165,20 +165,22 @@ fn make_speech(settings: &Settings, hk: &[HotKey]) -> String {
 
 fn main() {
     // Show print statements if we're running in a console
-    unsafe { AttachConsole(ATTACH_PARENT_PROCESS); }
+    unsafe {
+        AttachConsole(ATTACH_PARENT_PROCESS);
+    }
 
     // If an instance is already running, show a dialog and exit
-    let instance= SingleInstance::new(APP_INFO.name).unwrap();
+    let instance = SingleInstance::new(APP_INFO.name).unwrap();
     if !instance.is_single() {
         unsafe {
             wm::MessageBoxW(
                 None,
                 w!("rust_reader is already running!"),
                 w!("rust_reader"),
-                wm::MB_ICONSTOP
+                wm::MB_ICONSTOP,
             );
         }
-        return
+        return;
     }
 
     let com = Com::new();

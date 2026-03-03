@@ -3,15 +3,14 @@ use chrono;
 use std::mem::size_of;
 use std::mem::{zeroed, MaybeUninit};
 
-use windows::core::PCWSTR;
-use windows::w;
+use windows::core::{w, PCWSTR};
 use windows::Win32::{
     Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
     Graphics::Gdi,
     Media::Speech,
     System::Com as syscom,
     System::LibraryLoader,
-    System::WindowsProgramming::INFINITE,
+    System::Threading::INFINITE,
     UI::Shell,
     UI::WindowsAndMessaging as wm,
 };
@@ -33,10 +32,11 @@ pub struct Com {}
 impl Com {
     pub fn new() -> Com {
         println!("new for Com");
-        match unsafe { syscom::CoInitialize(Some(null_mut())) } {
-            Ok(_) => Com {},
-            Err(_) => panic!("failed for Com"),
+        let hr = unsafe { syscom::CoInitialize(Some(null_mut())) };
+        if hr.is_err() {
+            panic!("CoInitialize failed: {:?}", hr);
         }
+        Com {}
     }
 }
 
@@ -70,12 +70,12 @@ impl SpVoice {
             let mut out = Box::new(SpVoice {
                 voice: syscom::CoCreateInstance(&Speech::SpVoice, None, syscom::CLSCTX_ALL)
                     .expect("failed for SpVoice at CoCreateInstance"),
-                window: HWND(0),
+                window: HWND(null_mut()),
                 controls: OnScreenControlWindow::new(),
-                edit: HWND(0),
-                rate: HWND(0),
-                reload_settings: HWND(0),
-                show_controls: HWND(0),
+                edit: HWND(null_mut()),
+                rate: HWND(null_mut()),
+                reload_settings: HWND(null_mut()),
+                show_controls: HWND(null_mut()),
                 nicon: zeroed(),
                 last_read: WideString::new(),
                 last_update: None,
@@ -88,15 +88,16 @@ impl SpVoice {
                 lpfnWndProc: Some(window_proc_generic::<SpVoice>),
                 cbClsExtra: 0,
                 cbWndExtra: 0,
-                hInstance: HINSTANCE(0),
+                hInstance: HINSTANCE(null_mut()),
                 hIcon: wm::LoadIconW(
-                    LibraryLoader::GetModuleHandleW(PCWSTR::null()).unwrap(),
+                    Some(HINSTANCE(
+                        LibraryLoader::GetModuleHandleW(PCWSTR::null()).unwrap().0,
+                    )),
                     PCWSTR::from_raw(1 as *const u16),
                 )
                 .expect("failed to load icon"),
-                hCursor: wm::LoadCursorW(HINSTANCE(0), wm::IDI_APPLICATION)
-                    .expect("failed to load icon"),
-                hbrBackground: Gdi::HBRUSH(16),
+                hCursor: wm::LoadCursorW(None, wm::IDI_APPLICATION).expect("failed to load icon"),
+                hbrBackground: Gdi::HBRUSH(16 as _),
                 lpszMenuName: PCWSTR::null(),
                 lpszClassName: window_class_name,
             });
@@ -109,11 +110,12 @@ impl SpVoice {
                 0,
                 0,
                 0,
-                wm::GetDesktopWindow(),
-                wm::HMENU(0),
-                HINSTANCE(0),
+                Some(wm::GetDesktopWindow()),
+                None,
+                None,
                 Some(&mut *out as *mut _ as _),
-            );
+            )
+            .expect("CreateWindowExW failed");
 
             out.nicon.cbSize = size_of::<Shell::NOTIFYICONDATAW>() as u32;
             out.nicon.hWnd = out.window;
@@ -121,7 +123,9 @@ impl SpVoice {
             out.nicon.uID = 1 as u32;
             out.nicon.uFlags |= Shell::NIF_ICON;
             out.nicon.hIcon = wm::LoadIconW(
-                LibraryLoader::GetModuleHandleW(PCWSTR::null()).unwrap(),
+                Some(HINSTANCE(
+                    LibraryLoader::GetModuleHandleW(PCWSTR::null()).unwrap().0,
+                )),
                 PCWSTR::from_raw(1 as *const u16),
             )
             .expect("failed to load icon");
@@ -469,7 +473,7 @@ impl Windowed for SpVoice {
                     move_window(self.reload_settings, &left_button.inset(3));
                     move_window(self.show_controls, &right_button.inset(3));
                     unsafe {
-                        Gdi::InvalidateRect(self.rate, None, true);
+                        Gdi::InvalidateRect(Some(self.rate), None, true);
                     }
                     move_window(self.rate, &right.inset(3));
                     return Some(LRESULT(0));
@@ -485,10 +489,10 @@ impl Windowed for SpVoice {
                 use crate::press_hotkey;
                 use crate::Action;
                 if ((w_param.0 >> 16) & 0xffff) as u32 == wm::BN_CLICKED {
-                    if self.reload_settings.0 == l_param.0 {
+                    if self.reload_settings.0 as isize == l_param.0 {
                         press_hotkey(Action::ShowSettings);
                         return Some(LRESULT(0));
-                    } else if self.show_controls.0 == l_param.0 {
+                    } else if self.show_controls.0 as isize == l_param.0 {
                         self.controls.toggle_controls_visible();
                         return Some(LRESULT(0));
                     }

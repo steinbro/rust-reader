@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Input::KeyboardAndMouse;
 
 fn convert_modifiers(modifiers: u32) -> String {
@@ -63,13 +62,13 @@ impl HotKey {
         if modifiers > 0 && vk > 0 {
             let hr = unsafe {
                 KeyboardAndMouse::RegisterHotKey(
-                    HWND(0),
+                    None,
                     id,
                     KeyboardAndMouse::HOT_KEY_MODIFIERS(modifiers),
                     vk,
                 )
             };
-            if hr.0 == 0 {
+            if hr.is_err() {
                 // If binding fails, just store hotkey as unset
                 println!("failed to bind {}", new_hot);
                 new_hot.modifiers = 0;
@@ -109,8 +108,8 @@ impl ::std::fmt::Display for HotKey {
 impl Drop for HotKey {
     fn drop(&mut self) {
         if self.modifiers > 0 && self.vk > 0 {
-            unsafe { KeyboardAndMouse::UnregisterHotKey(HWND(0), self.id) };
+            unsafe { KeyboardAndMouse::UnregisterHotKey(None, self.id) };
         }
-        println!("drop for HotKey");
+        println!("drop for HotKey: {}", self);
     }
 }

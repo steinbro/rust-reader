@@ -1,7 +1,6 @@
-use windows::w;
-use windows::core::PCWSTR;
+use windows::core::{w, PCWSTR};
 use windows::Win32::{
-    Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
+    Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
     System::Console::SetConsoleTitleW,
     System::SystemServices::SS_NOPREFIX,
     UI::{
@@ -27,11 +26,12 @@ pub fn create_static_window(window_wnd: HWND, name: Option<&WideString>) -> HWND
             0,
             0,
             0,
-            window_wnd,
-            wm::HMENU(0),
-            HINSTANCE(0),
+            Some(window_wnd),
+            None,
+            None,
             None,
         )
+        .expect("CreateWindowExW failed")
     }
 }
 
@@ -49,11 +49,12 @@ pub fn create_button_window(window_wnd: HWND, name: PCWSTR) -> HWND {
             0,
             0,
             0,
-            window_wnd,
-            wm::HMENU(0),
-            HINSTANCE(0),
+            Some(window_wnd),
+            None,
+            None,
             None,
         )
+        .expect("CreateWindowExW failed")
     }
 }
 
@@ -74,17 +75,18 @@ pub fn create_edit_window(window_wnd: HWND, style: wm::WINDOW_STYLE) -> HWND {
             0,
             0,
             0,
-            window_wnd,
-            wm::HMENU(0),
-            HINSTANCE(0),
+            Some(window_wnd),
+            None,
+            None,
             None,
         )
+        .expect("CreateWindowExW failed")
     }
 }
 
 pub fn get_message() -> Option<wm::MSG> {
     let mut msg: wm::MSG = unsafe { mem::zeroed() };
-    if unsafe { wm::GetMessageW(&mut msg, HWND(0), 0, 0) } != true {
+    if unsafe { wm::GetMessageW(&mut msg, None, 0, 0) } != true {
         return None;
     }
     Some(msg)
@@ -95,11 +97,11 @@ pub fn enable_window(h_wnd: HWND, enable: bool) -> bool {
 }
 
 pub fn set_console_title(title: &WideString) -> bool {
-    unsafe { SetConsoleTitleW(PCWSTR::from_raw(title.as_ptr())).into() }
+    unsafe { SetConsoleTitleW(PCWSTR::from_raw(title.as_ptr())).is_ok() }
 }
 
 pub fn set_window_text(h_wnd: HWND, wide: &WideString) -> bool {
-    unsafe { wm::SetWindowTextW(h_wnd, PCWSTR::from_raw(wide.as_ptr())).into() }
+    unsafe { wm::SetWindowTextW(h_wnd, PCWSTR::from_raw(wide.as_ptr())).is_ok() }
 }
 
 pub fn get_window_text_length(h_wnd: HWND) -> i32 {
@@ -128,14 +130,14 @@ pub fn set_edit_selection(h_wnd: HWND, celec: &Range<usize>) -> LRESULT {
         wm::SendMessageW(
             h_wnd,
             EM_SETSEL,
-            WPARAM(celec.start),
-            LPARAM(celec.end.try_into().unwrap()),
+            Some(WPARAM(celec.start)),
+            Some(LPARAM(celec.end.try_into().unwrap())),
         )
     }
 }
 
 pub fn set_edit_scroll_caret(h_wnd: HWND) -> LRESULT {
-    unsafe { wm::SendMessageW(h_wnd, EM_SCROLLCARET, WPARAM(0), LPARAM(0)) }
+    unsafe { wm::SendMessageW(h_wnd, EM_SCROLLCARET, Some(WPARAM(0)), Some(LPARAM(0))) }
 }
 
 pub fn get_client_rect(h_wnd: HWND) -> RECT {
@@ -145,7 +147,7 @@ pub fn get_client_rect(h_wnd: HWND) -> RECT {
 }
 
 pub fn move_window(h_wnd: HWND, rect: &RECT) -> bool {
-    unsafe { wm::MoveWindow(h_wnd, rect.left, rect.top, rect.right, rect.bottom, true).into() }
+    unsafe { wm::MoveWindow(h_wnd, rect.left, rect.top, rect.right, rect.bottom, true).is_ok() }
 }
 
 pub fn is_window_visible(h_wnd: HWND) -> bool {
