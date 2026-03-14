@@ -1,12 +1,16 @@
 use average::{Estimate, Variance};
 use chrono;
+use std::collections::HashSet;
 use std::mem::size_of;
 use std::mem::{zeroed, MaybeUninit};
 
 use windows::core::{w, PCWSTR};
+use windows::Media::SpeechSynthesis as WinRtSpeech;
+use windows::Storage::Streams as WinRtStreams;
 use windows::Win32::{
     Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
     Graphics::Gdi,
+    Media::Audio,
     Media::Speech,
     System::Com as syscom,
     System::LibraryLoader,
@@ -23,6 +27,281 @@ use std::time::Instant;
 
 use crate::on_screen_control::*;
 use crate::window::*;
+
+/// A voice token representing either a legacy SAPI5 voice or a WinRT-only voice.
+#[derive(Clone)]
+enum VoiceToken {
+    Sapi(Speech::ISpObjectToken),
+    WinRt(WinRtSpeech::VoiceInformation),
+}
+
+impl VoiceToken {
+    fn name(&self) -> String {
+        match self {
+            VoiceToken::Sapi(t) => SpVoice::get_voice_name_sapi(t.clone()),
+            VoiceToken::WinRt(v) => v
+                .DisplayName()
+                .map(|s| s.to_string_lossy())
+                .unwrap_or_else(|_| "unknown".to_string()),
+        }
+    }
+}
+
+/// Converts a SAPI5 rate (-10..=10) to a WinRT speaking rate (0.5..=6.0).
+/// Uses an exponential mapping so that rate 0 → 1.0x, rate 10 → ~4x, rate -10 → ~0.25x (clamped to 0.5).
+fn rate_sapi_to_winrt(sapi_rate: i32) -> f64 {
+    2.0f64.powf(sapi_rate as f64 / 5.0).clamp(0.5, 6.0)
+}
+
+/// Parses a WAV file header and returns `(WAVEFORMATEX, data_offset)` where
+/// `data_offset` is the byte index of the first audio sample.
+fn parse_wav_format(data: &[u8]) -> Option<(Audio::WAVEFORMATEX, usize)> {
+    if data.len() < 12 || &data[0..4] != b"RIFF" || &data[8..12] != b"WAVE" {
+        return None;
+    }
+    let mut pos = 12usize;
+    let mut wfx: Option<Audio::WAVEFORMATEX> = None;
+    let mut data_offset: Option<usize> = None;
+    while pos + 8 <= data.len() {
+        let tag = &data[pos..pos + 4];
+        let chunk_size =
+            u32::from_le_bytes(data[pos + 4..pos + 8].try_into().ok()?) as usize;
+        let chunk_data = pos + 8;
+        if tag == b"fmt " && chunk_size >= 16 && chunk_data + 16 <= data.len() {
+            wfx = Some(Audio::WAVEFORMATEX {
+                wFormatTag: u16::from_le_bytes(
+                    data[chunk_data..chunk_data + 2].try_into().ok()?,
+                ),
+                nChannels: u16::from_le_bytes(
+                    data[chunk_data + 2..chunk_data + 4].try_into().ok()?,
+                ),
+                nSamplesPerSec: u32::from_le_bytes(
+                    data[chunk_data + 4..chunk_data + 8].try_into().ok()?,
+                ),
+                nAvgBytesPerSec: u32::from_le_bytes(
+                    data[chunk_data + 8..chunk_data + 12].try_into().ok()?,
+                ),
+                nBlockAlign: u16::from_le_bytes(
+                    data[chunk_data + 12..chunk_data + 14].try_into().ok()?,
+                ),
+                wBitsPerSample: u16::from_le_bytes(
+                    data[chunk_data + 14..chunk_data + 16].try_into().ok()?,
+                ),
+                cbSize: 0,
+            });
+        } else if tag == b"data" {
+            data_offset = Some(chunk_data);
+            break;
+        }
+        pos = chunk_data + chunk_size;
+        if chunk_size % 2 != 0 {
+            pos += 1;
+        }
+    }
+    wfx.zip(data_offset)
+}
+
+/// Manages audio playback of WinRT-synthesized speech via the Win32 waveOut API.
+struct WinRtVoiceState {
+    synth: WinRtSpeech::SpeechSynthesizer,
+    hwo: Option<Audio::HWAVEOUT>,
+    // These buffers must outlive the waveOut device handle:
+    _wav_buffer: Option<Box<Vec<u8>>>,
+    wav_hdr: Option<Box<Audio::WAVEHDR>>,
+    paused: bool,
+}
+
+impl WinRtVoiceState {
+    fn new(
+        voice_info: &WinRtSpeech::VoiceInformation,
+        rate: i32,
+    ) -> windows::core::Result<Self> {
+        let synth = WinRtSpeech::SpeechSynthesizer::new()?;
+        synth.SetVoice(voice_info)?;
+        synth
+            .Options()
+            .and_then(|o| o.SetSpeakingRate(rate_sapi_to_winrt(rate)))
+            .ok();
+        Ok(WinRtVoiceState {
+            synth,
+            hwo: None,
+            _wav_buffer: None,
+            wav_hdr: None,
+            paused: false,
+        })
+    }
+
+    fn set_rate(&self, rate: i32) {
+        self.synth
+            .Options()
+            .and_then(|o| o.SetSpeakingRate(rate_sapi_to_winrt(rate)))
+            .ok();
+    }
+
+    /// Stop any active waveOut playback and release resources.
+    fn stop(&mut self) {
+        if let Some(hwo) = self.hwo.take() {
+            unsafe {
+                if let Some(hdr) = self.wav_hdr.as_mut() {
+                    Audio::waveOutReset(hwo);
+                    Audio::waveOutUnprepareHeader(
+                        hwo,
+                        hdr.as_mut(),
+                        size_of::<Audio::WAVEHDR>() as u32,
+                    );
+                }
+                Audio::waveOutClose(hwo);
+            }
+        }
+        self.wav_hdr = None;
+        self._wav_buffer = None;
+        self.paused = false;
+    }
+
+    /// Synthesize `text` with WinRT and start waveOut playback asynchronously.
+    fn speak(&mut self, text: &windows::core::HSTRING) {
+        self.stop();
+
+        // Synthesize text → WAV stream (blocks until synthesis is complete).
+        let stream =
+            match self
+                .synth
+                .SynthesizeTextToStreamAsync(text)
+                .and_then(|op| op.get())
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    println!("WinRT TTS synthesis failed: {:?}", e);
+                    return;
+                }
+            };
+
+        // Read the stream into a byte buffer.
+        let size = match stream.Size() {
+            Ok(s) => s as usize,
+            Err(_) => return,
+        };
+        let input_stream = match stream.GetInputStreamAt(0) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let reader = match WinRtStreams::DataReader::CreateDataReader(&input_stream) {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+        if reader
+            .LoadAsync(size as u32)
+            .and_then(|op| op.get())
+            .is_err()
+        {
+            return;
+        }
+        let mut wav_data = vec![0u8; size];
+        if reader.ReadBytes(&mut wav_data).is_err() {
+            return;
+        }
+
+        // Parse the WAV header to get the audio format and data offset.
+        let (wfx, audio_start) = match parse_wav_format(&wav_data) {
+            Some(x) => x,
+            None => {
+                println!("WinRT TTS: failed to parse WAV header");
+                return;
+            }
+        };
+        let audio_len = wav_data.len().saturating_sub(audio_start);
+        if audio_len == 0 {
+            return;
+        }
+
+        // Keep the WAV buffer in a Box so its address is stable.
+        let mut buf = Box::new(wav_data);
+
+        // Open the waveOut device.
+        let mut hwo = Audio::HWAVEOUT::default();
+        let err = unsafe {
+            Audio::waveOutOpen(
+                Some(&mut hwo as *mut _),
+                Audio::WAVE_MAPPER,
+                &wfx as *const _,
+                Some(0),
+                Some(0),
+                Audio::CALLBACK_NULL,
+            )
+        };
+        if err != 0 {
+            println!("waveOutOpen failed: {}", err);
+            return;
+        }
+
+        // Prepare and submit the audio buffer.
+        let mut hdr = Box::new(Audio::WAVEHDR {
+            lpData: windows::core::PSTR::from_raw(buf[audio_start..].as_mut_ptr()),
+            dwBufferLength: audio_len as u32,
+            ..Default::default()
+        });
+        let err = unsafe {
+            Audio::waveOutPrepareHeader(hwo, hdr.as_mut(), size_of::<Audio::WAVEHDR>() as u32)
+        };
+        if err != 0 {
+            unsafe { Audio::waveOutClose(hwo) };
+            println!("waveOutPrepareHeader failed: {}", err);
+            return;
+        }
+        let err = unsafe {
+            Audio::waveOutWrite(hwo, hdr.as_mut(), size_of::<Audio::WAVEHDR>() as u32)
+        };
+        if err != 0 {
+            unsafe {
+                Audio::waveOutUnprepareHeader(
+                    hwo,
+                    hdr.as_mut(),
+                    size_of::<Audio::WAVEHDR>() as u32,
+                );
+                Audio::waveOutClose(hwo);
+            }
+            println!("waveOutWrite failed: {}", err);
+            return;
+        }
+
+        self.hwo = Some(hwo);
+        self._wav_buffer = Some(buf);
+        self.wav_hdr = Some(hdr);
+        self.paused = false;
+    }
+
+    fn pause(&mut self) {
+        // HWAVEOUT is Copy; this copies the handle without consuming self.hwo.
+        if let Some(hwo) = self.hwo {
+            unsafe { Audio::waveOutPause(hwo) };
+            self.paused = true;
+        }
+    }
+
+    fn resume(&mut self) {
+        // HWAVEOUT is Copy; this copies the handle without consuming self.hwo.
+        if let Some(hwo) = self.hwo {
+            unsafe { Audio::waveOutRestart(hwo) };
+            self.paused = false;
+        }
+    }
+
+    /// Block until the current waveOut buffer finishes playing.
+    fn wait(&self) {
+        while let Some(hdr) = self.wav_hdr.as_ref() {
+            if hdr.dwFlags & Audio::WHDR_DONE != 0 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+}
+
+impl Drop for WinRtVoiceState {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
 
 pub const WM_SAPI_EVENT: u32 = wm::WM_APP + 15;
 pub const WM_APP_NOTIFICATION_ICON: u32 = wm::WM_APP + 16;
@@ -60,6 +339,10 @@ pub struct SpVoice {
     last_read: WideString,
     last_update: Option<(Instant, Range<usize>)>,
     us_per_utf16: [Variance; 21],
+    /// Active WinRT voice state; `Some` when a WinRT-only voice is selected.
+    winrt_state: Option<WinRtVoiceState>,
+    /// Most recently set speech rate (-10..=10), kept for WinRT re-synthesis.
+    sapi_rate: i32,
 }
 
 impl SpVoice {
@@ -80,6 +363,8 @@ impl SpVoice {
                 last_read: WideString::new(),
                 last_update: None,
                 us_per_utf16: Default::default(),
+                winrt_state: None,
+                sapi_rate: 0,
             });
 
             let window_class_name = w!("SAPI_event_window_class_name");
@@ -205,21 +490,32 @@ impl SpVoice {
     pub fn speak<T: Into<WideString>>(&mut self, string: T) {
         self.last_read = string.into();
         set_window_text(self.edit, &self.last_read);
-        unsafe {
-            self.voice.Speak(
-                PCWSTR::from_raw(self.last_read.as_ptr()),
-                (Speech::SVSFlagsAsync.0 | Speech::SVSFPurgeBeforeSpeak.0 | Speech::SVSFIsNotXML.0)
-                    .try_into()
-                    .unwrap(),
-                None,
-            )
+        if let Some(winrt) = self.winrt_state.as_mut() {
+            let text = windows::core::HSTRING::from(self.last_read.as_string());
+            winrt.speak(&text);
+        } else {
+            unsafe {
+                self.voice.Speak(
+                    PCWSTR::from_raw(self.last_read.as_ptr()),
+                    (Speech::SVSFlagsAsync.0
+                        | Speech::SVSFPurgeBeforeSpeak.0
+                        | Speech::SVSFIsNotXML.0)
+                        .try_into()
+                        .unwrap(),
+                    None,
+                )
+            }
+            .unwrap();
         }
-        .unwrap();
         self.last_update = None;
     }
 
     pub fn wait(&mut self) {
-        unsafe { self.voice.WaitUntilDone(INFINITE) }.unwrap();
+        if let Some(winrt) = self.winrt_state.as_ref() {
+            winrt.wait();
+        } else {
+            unsafe { self.voice.WaitUntilDone(INFINITE) }.unwrap();
+        }
     }
 
     pub fn speak_wait<T: Into<WideString>>(&mut self, string: T) {
@@ -228,17 +524,31 @@ impl SpVoice {
     }
 
     pub fn pause(&mut self) {
-        unsafe { self.voice.Pause() }.unwrap();
+        if let Some(winrt) = self.winrt_state.as_mut() {
+            winrt.pause();
+        } else {
+            unsafe { self.voice.Pause() }.unwrap();
+        }
         self.last_update = None;
     }
 
     pub fn resume(&mut self) {
-        unsafe { self.voice.Resume() }.unwrap();
+        if let Some(winrt) = self.winrt_state.as_mut() {
+            winrt.resume();
+        } else {
+            unsafe { self.voice.Resume() }.unwrap();
+        }
         self.last_update = None;
     }
 
     pub fn set_rate(&mut self, rate: i32) -> i32 {
         let rate = max(min(rate, 10), -10);
+        self.sapi_rate = rate;
+        if let Some(winrt) = self.winrt_state.as_ref() {
+            winrt.set_rate(rate);
+        }
+        // Always update the SAPI5 voice rate so that switching back from a WinRT
+        // voice to a SAPI5 voice reflects the correct rate immediately.
         unsafe { self.voice.SetRate(rate) }.unwrap();
         self.last_update = None;
         self.get_rate()
@@ -256,7 +566,7 @@ impl SpVoice {
         self.set_rate(rate)
     }
 
-    fn get_voice_name(token: Speech::ISpObjectToken) -> String {
+    fn get_voice_name_sapi(token: Speech::ISpObjectToken) -> String {
         unsafe {
             token
                 .OpenKey(w!("Attributes"))
@@ -267,7 +577,7 @@ impl SpVoice {
         }
     }
 
-    fn available_voices(&mut self) -> Vec<Speech::ISpObjectToken> {
+    fn available_sapi_voices() -> Vec<Speech::ISpObjectToken> {
         let mut voices = vec![];
         // Registry keys where voice tokens may be found
         let voice_categories = [
@@ -300,30 +610,104 @@ impl SpVoice {
         voices
     }
 
-    pub fn available_voice_names(&mut self) -> Vec<String> {
-        self.available_voices()
+    /// Returns all available voices, combining SAPI5 registry voices with any
+    /// WinRT voices (e.g. newer Microsoft Natural voices) not already represented.
+    fn available_voices() -> Vec<VoiceToken> {
+        // Start with SAPI5 voices from the Windows registry.
+        let sapi_tokens = Self::available_sapi_voices();
+        let mut voice_names: HashSet<String> = HashSet::new();
+        let mut voices: Vec<VoiceToken> = sapi_tokens
+            .into_iter()
+            .map(|t| {
+                let name = Self::get_voice_name_sapi(t.clone());
+                voice_names.insert(name.to_lowercase());
+                VoiceToken::Sapi(t)
+            })
+            .collect();
+
+        // Append WinRT voices that are not already represented by a SAPI5 token.
+        // These include newer natural voices like Jenny and Aria that may only be
+        // accessible through the Windows.Media.SpeechSynthesis API.
+        if let Ok(winrt_voices) = WinRtSpeech::SpeechSynthesizer::AllVoices() {
+            for voice_info in &winrt_voices {
+                let name = voice_info
+                    .DisplayName()
+                    .map(|s| s.to_string_lossy())
+                    .unwrap_or_else(|_| "unknown".to_string());
+                if !voice_names.contains(&name.to_lowercase()) {
+                    voice_names.insert(name.to_lowercase());
+                    voices.push(VoiceToken::WinRt(voice_info));
+                }
+            }
+        }
+        voices
+    }
+
+    pub fn available_voice_names() -> Vec<String> {
+        Self::available_voices()
             .iter()
-            .map(|t| SpVoice::get_voice_name(t.clone()))
+            .map(|t| t.name())
             .collect::<Vec<_>>()
     }
 
-    fn set_voice(&mut self, token: Speech::ISpObjectToken) {
+    fn set_voice_sapi(&mut self, token: Speech::ISpObjectToken) {
         unsafe { self.voice.SetVoice(&token).ok() };
     }
 
     pub fn set_voice_by_name(&mut self, voice_name: String) -> String {
-        if let Some(t) = self
-            .available_voices()
-            .iter()
-            .find(|&t| voice_name == SpVoice::get_voice_name(t.clone()))
-        {
-            self.set_voice(t.clone());
+        let voices = Self::available_voices();
+        if let Some(token) = voices.iter().find(|t| voice_name == t.name()) {
+            match token {
+                VoiceToken::Sapi(t) => {
+                    // Use legacy SAPI5 path; clear any WinRT state.
+                    self.winrt_state = None;
+                    self.set_voice_sapi(t.clone());
+                }
+                VoiceToken::WinRt(v) => {
+                    // Create a WinRT synthesizer for this voice.
+                    match WinRtVoiceState::new(v, self.sapi_rate) {
+                        Ok(state) => {
+                            self.winrt_state = Some(state);
+                        }
+                        Err(e) => {
+                            println!("Failed to create WinRT voice state: {:?}", e);
+                        }
+                    }
+                }
+            }
         }
-        // Return name of voice now in use
-        match unsafe { self.voice.GetVoice().ok() } {
-            Some(t) => SpVoice::get_voice_name(t),
-            None => "unknown".to_string(),
+        // Return the name of the voice now in use.
+        if let Some(winrt) = &self.winrt_state {
+            winrt
+                .synth
+                .Voice()
+                .and_then(|v| v.DisplayName())
+                .map(|s| s.to_string_lossy())
+                .unwrap_or_else(|_| "unknown".to_string())
+        } else {
+            match unsafe { self.voice.GetVoice().ok() } {
+                Some(t) => Self::get_voice_name_sapi(t),
+                None => "unknown".to_string(),
+            }
         }
+    }
+
+    /// Returns `true` when speech is currently paused (works for both SAPI5 and WinRT voices).
+    pub fn is_paused(&self) -> bool {
+        if let Some(winrt) = &self.winrt_state {
+            winrt.paused
+        } else {
+            self.get_status_running_state() == 2
+        }
+    }
+
+    /// Returns `dwRunningState` from the SAPI5 voice status.
+    /// On error, returns 0 (idle/not-speaking), which is a safe default for
+    /// `is_paused()` — the caller will assume the voice is not paused.
+    fn get_status_running_state(&self) -> u32 {
+        let mut status: Speech::SPVOICESTATUS = unsafe { mem::zeroed() };
+        unsafe { self.voice.GetStatus(&mut status, null_mut()) }.ok();
+        status.dwRunningState
     }
 
     pub fn set_volume(&mut self, volume: u16) {
@@ -408,6 +792,70 @@ fn test_format_duration() {
     assert_eq!(format_duration(duration), "0:09");
     let duration = chrono::Duration::seconds(0);
     assert_eq!(format_duration(duration), "0:00");
+}
+
+#[test]
+fn test_rate_sapi_to_winrt() {
+    // Rate 0 should map to 1.0x normal speed.
+    assert!((rate_sapi_to_winrt(0) - 1.0).abs() < 1e-9);
+    // Rate 5 should map to 2.0x.
+    assert!((rate_sapi_to_winrt(5) - 2.0).abs() < 1e-9);
+    // Rate 10 should map to 4.0x.
+    assert!((rate_sapi_to_winrt(10) - 4.0).abs() < 1e-9);
+    // Rate -10 is clamped to 0.5x minimum.
+    assert!((rate_sapi_to_winrt(-10) - 0.5).abs() < 1e-9);
+    // Result is always within the documented WinRT range [0.5, 6.0].
+    for r in -10..=10 {
+        let winrt = rate_sapi_to_winrt(r);
+        assert!(winrt >= 0.5 && winrt <= 6.0, "rate {} → {} out of range", r, winrt);
+    }
+}
+
+#[test]
+fn test_parse_wav_format_valid() {
+    // Minimal WAV: RIFF header + fmt chunk (16 bytes PCM) + data chunk (4 bytes).
+    let mut wav = Vec::new();
+    let fmt_chunk_size: u32 = 16;
+    let data_chunk_size: u32 = 4;
+    let riff_size: u32 = 4 + 8 + fmt_chunk_size + 8 + data_chunk_size;
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&riff_size.to_le_bytes());
+    wav.extend_from_slice(b"WAVE");
+    // fmt chunk
+    wav.extend_from_slice(b"fmt ");
+    wav.extend_from_slice(&fmt_chunk_size.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());    // wFormatTag = PCM
+    wav.extend_from_slice(&1u16.to_le_bytes());    // nChannels = 1
+    wav.extend_from_slice(&16000u32.to_le_bytes()); // nSamplesPerSec
+    wav.extend_from_slice(&32000u32.to_le_bytes()); // nAvgBytesPerSec
+    wav.extend_from_slice(&2u16.to_le_bytes());    // nBlockAlign
+    wav.extend_from_slice(&16u16.to_le_bytes());   // wBitsPerSample
+    // data chunk
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_chunk_size.to_le_bytes());
+    wav.extend_from_slice(&[0u8; 4]);
+
+    let result = parse_wav_format(&wav);
+    assert!(result.is_some(), "should parse valid WAV");
+    let (wfx, offset) = result.unwrap();
+    assert_eq!(wfx.wFormatTag, 1);
+    assert_eq!(wfx.nChannels, 1);
+    assert_eq!(wfx.nSamplesPerSec, 16000);
+    assert_eq!(wfx.wBitsPerSample, 16);
+    assert_eq!(offset, wav.len() - 4); // data starts 4 bytes before end
+}
+
+#[test]
+fn test_parse_wav_format_invalid() {
+    // Not a WAV file.
+    assert!(parse_wav_format(b"NotAWAVFile").is_none());
+    // Empty slice.
+    assert!(parse_wav_format(&[]).is_none());
+    // RIFF but wrong WAVE marker.
+    let mut bad = vec![0u8; 12];
+    bad[0..4].copy_from_slice(b"RIFF");
+    bad[8..12].copy_from_slice(b"MP3 ");
+    assert!(parse_wav_format(&bad).is_none());
 }
 
 impl Windowed for SpVoice {

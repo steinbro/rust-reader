@@ -94,9 +94,10 @@ impl State {
     }
 
     fn play_pause(&mut self) {
-        match self.voice.get_status().dwRunningState {
-            2 => self.voice.pause(),
-            _ => self.voice.resume(),
+        if self.voice.is_paused() {
+            self.voice.resume();
+        } else {
+            self.voice.pause();
         }
     }
 
@@ -186,7 +187,7 @@ fn main() {
     let com = Com::new();
     let mut voice = SpVoice::new(&com);
     let mut settings = Settings::from_file();
-    let voices = voice.available_voice_names();
+    let voices = SpVoice::available_voice_names();
     voice.set_rate(settings.rate);
     voice.set_voice_by_name(settings.voice.clone());
     voice.set_time_estimater(settings.time_estimater.clone());
