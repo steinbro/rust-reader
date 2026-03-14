@@ -1,6 +1,5 @@
 use average::{Estimate, Variance};
 use chrono;
-use std::collections::HashSet;
 use std::mem::size_of;
 use std::mem::{zeroed, MaybeUninit};
 
@@ -14,6 +13,7 @@ use windows::Win32::{
     Media::Speech,
     System::Com as syscom,
     System::LibraryLoader,
+    System::Registry as Reg,
     System::Threading::INFINITE,
     UI::Shell,
     UI::WindowsAndMessaging as wm,
@@ -51,6 +51,44 @@ impl VoiceToken {
 /// Uses an exponential mapping so that rate 0 → 1.0x, rate 10 → ~4x, rate -10 → ~0.25x (clamped to 0.5).
 fn rate_sapi_to_winrt(sapi_rate: i32) -> f64 {
     2.0f64.powf(sapi_rate as f64 / 5.0).clamp(0.5, 6.0)
+}
+
+/// Returns `true` when the registry key identified by `voice_id` exists on this machine.
+///
+/// `VoiceInformation::Id()` returns a path like
+/// `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens\MSTTS_V110_enCA_LindaM`
+/// which is the same registry key used by SAPI5. Opening that key is the most
+/// reliable way to determine whether the voice is already enumerable via SAPI5,
+/// regardless of how either API formats its display name or token-ID string.
+fn voice_id_in_registry(voice_id: &str) -> bool {
+    let (hive, subkey) =
+        if let Some(rest) = voice_id.strip_prefix("HKEY_LOCAL_MACHINE\\") {
+            (Reg::HKEY_LOCAL_MACHINE, rest)
+        } else if let Some(rest) = voice_id.strip_prefix("HKEY_CURRENT_USER\\") {
+            (Reg::HKEY_CURRENT_USER, rest)
+        } else {
+            return false;
+        };
+    let subkey_w: Vec<u16> = subkey
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut hkey = Reg::HKEY::default(); // null handle; overwritten on success by RegOpenKeyExW
+    unsafe {
+        if Reg::RegOpenKeyExW(
+            hive,
+            PCWSTR(subkey_w.as_ptr()),
+            None, // uloptions: reserved, must be None (0)
+            Reg::KEY_READ,
+            &mut hkey,
+        )
+        .is_ok()
+        {
+            let _ = Reg::RegCloseKey(hkey);
+            return true;
+        }
+    }
+    false
 }
 
 /// Parses a WAV file header and returns `(WAVEFORMATEX, data_offset)` where
@@ -613,52 +651,28 @@ impl SpVoice {
     /// Returns all available voices, combining SAPI5 registry voices with any
     /// WinRT voices (e.g. newer Microsoft Natural voices) not already represented.
     ///
-    /// Deduplication is done by comparing the WinRT voice's Id (a registry-path
-    /// string) against the SAPI5 token IDs returned by `ISpObjectToken::GetId()`.
-    /// This is more reliable than comparing display names, which differ between
-    /// the two APIs (e.g. "Microsoft Zira Desktop" in SAPI5 vs "Microsoft Zira"
-    /// in WinRT).
+    /// Deduplication uses the Win32 registry directly: `VoiceInformation::Id()`
+    /// returns the voice's registry key path (e.g.
+    /// `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens\MSTTS_V110_enCA_LindaM`).
+    /// If that key exists, the voice is already in the SAPI5 list and is skipped.
+    /// This avoids all string-format differences between `ISpObjectToken::GetId()`
+    /// and `VoiceInformation::Id()` that caused previous deduplication attempts to fail.
     fn available_voices() -> Vec<VoiceToken> {
         // Start with SAPI5 voices from the Windows registry.
         let sapi_tokens = Self::available_sapi_voices();
-
-        // Collect all SAPI5 token IDs for deduplication.  The token ID is the
-        // registry key path, e.g.
-        //   HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens\MSTTS_V110_enCA_LindaM
-        // WinRT VoiceInformation.Id() returns the same path, so we can compare
-        // directly instead of relying on display names which differ between APIs.
-        let mut sapi_token_ids: HashSet<String> = HashSet::new();
-        for token in &sapi_tokens {
-            let id_opt = unsafe {
-                token.GetId().ok().and_then(|p| p.to_string().ok())
-            };
-            if let Some(id_str) = id_opt {
-                sapi_token_ids.insert(id_str.to_lowercase());
-            }
-        }
-
-        let mut voices: Vec<VoiceToken> = sapi_tokens
-            .into_iter()
-            .map(VoiceToken::Sapi)
-            .collect();
+        let mut voices: Vec<VoiceToken> = sapi_tokens.into_iter().map(VoiceToken::Sapi).collect();
 
         // Append WinRT voices that are not already represented by a SAPI5 token.
         // These include newer natural voices like Jenny and Aria that may only be
         // accessible through the Windows.Media.SpeechSynthesis API.
         if let Ok(winrt_voices) = WinRtSpeech::SpeechSynthesizer::AllVoices() {
             for voice_info in &winrt_voices {
-                // VoiceInformation::Id() returns the same registry-path token ID
-                // as ISpObjectToken::GetId(). Skip voices whose ID is already
-                // covered by SAPI5; only add genuinely WinRT-only voices.
-                let id = match voice_info.Id() {
-                    Ok(s) => s.to_string_lossy(),
-                    Err(_) => {
-                        println!("WinRT voice enumeration: failed to get voice ID, skipping");
-                        continue;
-                    }
-                };
-                if !sapi_token_ids.contains(&id.to_lowercase()) {
-                    voices.push(VoiceToken::WinRt(voice_info));
+                // VoiceInformation::Id() returns the voice's registry key path.
+                // If that key exists the voice is already in SAPI5; skip it.
+                // If Id() fails we cannot tell, so we add it (safe default).
+                match voice_info.Id() {
+                    Ok(id) if voice_id_in_registry(&id.to_string_lossy()) => {}
+                    _ => voices.push(VoiceToken::WinRt(voice_info)),
                 }
             }
         }
