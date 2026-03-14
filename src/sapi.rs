@@ -612,17 +612,34 @@ impl SpVoice {
 
     /// Returns all available voices, combining SAPI5 registry voices with any
     /// WinRT voices (e.g. newer Microsoft Natural voices) not already represented.
+    ///
+    /// Deduplication is done by comparing the WinRT voice's Id (a registry-path
+    /// string) against the SAPI5 token IDs returned by `ISpObjectToken::GetId()`.
+    /// This is more reliable than comparing display names, which differ between
+    /// the two APIs (e.g. "Microsoft Zira Desktop" in SAPI5 vs "Microsoft Zira"
+    /// in WinRT).
     fn available_voices() -> Vec<VoiceToken> {
         // Start with SAPI5 voices from the Windows registry.
         let sapi_tokens = Self::available_sapi_voices();
-        let mut voice_names: HashSet<String> = HashSet::new();
+
+        // Collect all SAPI5 token IDs for deduplication.  The token ID is the
+        // registry key path, e.g.
+        //   HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens\MSTTS_V110_enCA_LindaM
+        // WinRT VoiceInformation.Id() returns the same path, so we can compare
+        // directly instead of relying on display names which differ between APIs.
+        let mut sapi_token_ids: HashSet<String> = HashSet::new();
+        for token in &sapi_tokens {
+            let id_opt = unsafe {
+                token.GetId().ok().and_then(|p| p.to_string().ok())
+            };
+            if let Some(id_str) = id_opt {
+                sapi_token_ids.insert(id_str.to_lowercase());
+            }
+        }
+
         let mut voices: Vec<VoiceToken> = sapi_tokens
             .into_iter()
-            .map(|t| {
-                let name = Self::get_voice_name_sapi(t.clone());
-                voice_names.insert(name.to_lowercase());
-                VoiceToken::Sapi(t)
-            })
+            .map(VoiceToken::Sapi)
             .collect();
 
         // Append WinRT voices that are not already represented by a SAPI5 token.
@@ -630,12 +647,17 @@ impl SpVoice {
         // accessible through the Windows.Media.SpeechSynthesis API.
         if let Ok(winrt_voices) = WinRtSpeech::SpeechSynthesizer::AllVoices() {
             for voice_info in &winrt_voices {
-                let name = voice_info
-                    .DisplayName()
-                    .map(|s| s.to_string_lossy())
-                    .unwrap_or_else(|_| "unknown".to_string());
-                if !voice_names.contains(&name.to_lowercase()) {
-                    voice_names.insert(name.to_lowercase());
+                // VoiceInformation::Id() returns the same registry-path token ID
+                // as ISpObjectToken::GetId(). Skip voices whose ID is already
+                // covered by SAPI5; only add genuinely WinRT-only voices.
+                let id = match voice_info.Id() {
+                    Ok(s) => s.to_string_lossy(),
+                    Err(_) => {
+                        println!("WinRT voice enumeration: failed to get voice ID, skipping");
+                        continue;
+                    }
+                };
+                if !sapi_token_ids.contains(&id.to_lowercase()) {
                     voices.push(VoiceToken::WinRt(voice_info));
                 }
             }
@@ -895,7 +917,15 @@ impl Windowed for SpVoice {
                     self.us_per_utf16[rate_shifted].add(new_rate);
                 }
                 self.last_update = Some((Instant::now(), word_range.clone()));
-                let len_left = (self.last_read.len() - word_range.end) as f64;
+                let read_len = self.last_read.len();
+                // Guard against stale SAPI events where word positions exceed the
+                // current buffer length (e.g. after a voice switch or failed WinRT
+                // synthesis), which would otherwise cause an arithmetic overflow.
+                if word_range.end > read_len || word_range.start > read_len {
+                    self.last_update = None;
+                    return Some(LRESULT(0));
+                }
+                let len_left = (read_len - word_range.end) as f64;
                 let ms_left = len_left * self.us_per_utf16[rate_shifted].mean()
                     + (len_left * self.us_per_utf16[rate_shifted].sample_variance()).sqrt();
                 let window_title = format!(
